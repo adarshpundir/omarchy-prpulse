@@ -1,78 +1,82 @@
 #!/bin/sh
-# Attention counter for the PR Pulse bar widget.
+# Orchestrator for the PR Pulse bar widget.
 #
-# Usage (internal): check.sh <token-file>
+# Usage: check.sh <github-token-file> <forges-csv> <secrets-dir> \
+#                 <gitlab-host> <gitlab-user>
 #
-# Token resolution order:
-#   1. the given file (one raw token inside)
-#   2. `gh auth token` from the GitHub CLI keyring
-#
-# Prints "<reviews-needed> <ci-failing>" on stdout. The token is fed to curl
-# through its config on stdin so it never appears in `ps` output or logs.
-# Exit codes: 0 ok, 2 setup problem, 3 API failure.
+# Runs each enabled forge adapter and prints one JSON object on stdout:
+#   {"total":{"reviews":R,"failing":F},
+#    "forges":{"github":{"reviews":2,"failing":1},
+#              "gitlab":{"error":"no token"}}}
+# Errors go to stderr as they happen; per-forge errors also land in the JSON.
+# Exit codes: 0 at least one forge succeeded, 3 every enabled forge failed.
 
 set -u
 
-[ $# -eq 1 ] || { echo "usage: check.sh token-file" >&2; exit 2; }
+[ $# -eq 5 ] || { echo "usage: check.sh github-token-file forges secrets-dir gitlab-host gitlab-user" >&2; exit 2; }
 
-token_file=$1
-if [ -r "$token_file" ]; then
-  token=$(tr -d ' \r\n' < "$token_file")
-  [ -n "$token" ] || { echo "token file is empty: $token_file" >&2; exit 2; }
-elif command -v gh > /dev/null 2>&1 && gh auth token > /dev/null 2>&1; then
-  token=$(gh auth token)
-else
-  echo "no token: create $token_file or run \`gh auth login\`" >&2
-  exit 2
-fi
+gh_token_file=$1
+forges=$2
+secrets_dir=$3
+gitlab_host=$4
+gitlab_user=$5
 
-query='query {
-  reviews: search(query: "is:pull-request is:open review-requested:@me archived:false", type: ISSUE, first: 1) { issueCount }
-  failing: search(query: "is:pull-request is:open author:@me status:failure archived:false", type: ISSUE, first: 1) { issueCount }
-}'
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
 
-payload=$(python3 -c '
-import json, sys
-print(json.dumps({"query": sys.argv[1]}))
-' "$query") || { echo "python3 is required but was not found" >&2; exit 2; }
+wanted=$(printf '%s' "$forges" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$')
+[ -n "$wanted" ] || { echo "no forges configured" >&2; exit 2; }
 
-response=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -sS --max-time 20 \
-  --url "https://api.github.com/graphql" \
-  --data "$payload" \
-  --config - 2>&1)
-status=$?
+echo "$wanted" | while IFS= read -r forge; do
+  case "$forge" in
+    github)
+      timeout 45 sh "$here/forge/github.sh" "$gh_token_file" \
+        > "$work/github.out" 2> "$work/github.err" ;;
+    gitlab)
+      timeout 45 sh "$here/forge/gitlab.sh" "$gitlab_host" "$gitlab_user" "$secrets_dir" \
+        > "$work/gitlab.out" 2> "$work/gitlab.err" ;;
+    bitbucket)
+      timeout 45 sh "$here/forge/bitbucket.sh" "$secrets_dir" \
+        > "$work/bitbucket.out" 2> "$work/bitbucket.err" ;;
+    *)
+      echo "unknown forge: $forge (supported: github, gitlab, bitbucket)" >&2 ;;
+  esac
+done
 
-if [ $status -ne 0 ]; then
-  echo "curl failed ($status): $response" >&2
-  exit 3
-fi
+PULSE_WORK="$work" PULSE_FORGES="$wanted" python3 << 'PYEOF'
+import json, os, sys
 
-printf '%s\n' "$response" | python3 -c '
-import json, sys
+work = os.environ["PULSE_WORK"]
+forges = [f for f in os.environ["PULSE_FORGES"].splitlines() if f]
 
-try:
-    body = json.load(sys.stdin)
-except ValueError:
-    print("non-JSON response from GitHub API", file=sys.stderr)
-    sys.exit(3)
+result = {"total": {"reviews": 0, "failing": 0}, "forges": {}}
+ok = False
+for forge in forges:
+    out_path = os.path.join(work, f"{forge}.out")
+    err_path = os.path.join(work, f"{forge}.err")
+    entry = {}
+    try:
+        with open(out_path) as f:
+            parts = f.read().split()
+            entry["reviews"] = int(parts[0])
+            entry["failing"] = int(parts[1])
+            ok = True
+    except (OSError, IndexError, ValueError):
+        try:
+            with open(err_path) as f:
+                message = f.read().strip()
+            entry["error"] = message.split("\n")[0] if message else "failed"
+        except OSError:
+            entry["error"] = "failed"
+        print(entry.get("error", ""), file=sys.stderr)
+    result["forges"][forge] = entry
 
-errors = body.get("errors")
-if errors:
-    print("; ".join(str(e.get("message", e)) for e in errors), file=sys.stderr)
-    sys.exit(3)
+for entry in result["forges"].values():
+    if "reviews" in entry:
+        result["total"]["reviews"] += entry["reviews"]
+        result["total"]["failing"] += entry["failing"]
 
-data = body.get("data")
-if not data:
-    print("missing data in response (bad token or rate limit)", file=sys.stderr)
-    sys.exit(3)
-
-try:
-    reviews = int(data["reviews"]["issueCount"])
-    failing = int(data["failing"]["issueCount"])
-except (KeyError, TypeError, ValueError):
-    print("unexpected response shape", file=sys.stderr)
-    sys.exit(3)
-
-print(reviews, failing)
-'
-exit $?
+print(json.dumps(result, separators=(",", ":")))
+sys.exit(0 if ok else 3)
+PYEOF

@@ -13,8 +13,8 @@ jobs:
       - name: Install linters
         run: sudo apt-get update && sudo apt-get install -y shellcheck jq
 
-      - name: ShellCheck check.sh
-        run: shellcheck --severity=warning check.sh
+      - name: ShellCheck all shell scripts
+        run: git ls-files '*.sh' | xargs shellcheck --severity=warning
 
       - name: Manifest is valid JSON with required fields
         run: |

@@ -1,20 +1,21 @@
 # PR Pulse
 
-Pull requests awaiting your review and CI failures on your own open PRs,
-live in the Omarchy bar.
+Pull requests awaiting your review and CI failures across **GitHub, GitLab
+and Bitbucket**, live in the Omarchy bar.
 
 ```
- octocat 3        <- 3 PRs need your review
+ octocat 3        <- 3 items need your review
  octocat 1 (red)  <- red when a build is failing
 ```
 
-- **Reviews**: open PRs with `review-requested:@me`
-- **CI failures**: your open PRs whose latest status is failing
-- Red icon = failing checks or an error (hover for details)
-- Dim icon = all clear, badge hidden by default when nothing needs you
+- **Reviews**: PRs/MRs where you are the requested reviewer (Bitbucket:
+  assigned to you)
+- **CI failures**: your own open PRs whose latest pipeline/build is failing
+- Red icon = failing checks or total failure to reach any forge; dim = all clear
+- Badge sums every enabled forge; hover for the per-forge breakdown
+  (`GH 2R+1F · GL 0R+3F`)
 
-Left click opens GitHub, right click refreshes now. Polls the GitHub GraphQL
-API every 5 minutes.
+Left click opens your forge, right click refreshes now. Polls every 5 minutes.
 
 ## Install
 
@@ -26,22 +27,26 @@ omarchy plugin add https://github.com/adarshpundir/omarchy-prpulse.git --enable
 
 ## Authentication
 
-PR Pulse resolves a token in this order:
+PR Pulse never puts credentials in process arguments - each adapter hands its
+token to curl over stdin config, so nothing shows up in `ps`, logs, or core
+dumps. Secrets travel over TLS to the forge API and nowhere else.
 
-1. The file set on the widget's `tokenFile` setting
-   (default `~/.config/omarchy/github.token`, one raw token inside,
-   `chmod 600` recommended) - use this for fine-grained tokens or machines
-   without `gh`.
-2. [`gh auth token`](https://cli.github.com/) - if the GitHub CLI is installed
-   and logged in, its keyring token is used and no file is needed.
+| Forge | Zero setup | File fallback |
+|---|---|---|
+| GitHub | [`gh auth token`](https://cli.github.com/) keyring | `tokenFile` setting or `secretsDir/github.token` |
+| GitLab | `glab auth login` keyring | `secretsDir/gitlab.token` (PAT with `read_api`) |
+| Bitbucket Cloud | none exists - file required | `secretsDir/bitbucket.token` containing one line `email:app-password` |
 
-Either way the token is handed to curl over stdin config, so it never shows up
-in process arguments (`ps`), logs, or core dumps - it travels to
-`api.github.com` over TLS and nowhere else.
+Default `secretsDir` is `~/.config/omarchy/prpulse`. Create it with:
 
-Scope guidance: classic token with `repo` scope sees public + private PRs;
-a fine-grained read-only token counts only repos you grant it; the default
-`gh` OAuth token works out of the box.
+```sh
+install -d -m700 ~/.config/omarchy/prpulse
+```
+
+Scope guidance: a classic GitHub token with `repo` scope sees private PRs;
+fine-grained read-only tokens count only repos you grant; GitLab PATs need
+`read_api`; Bitbucket app passwords need Pull requests: Read + Repositories:
+Read.
 
 ## Configuration
 
@@ -49,43 +54,50 @@ Everything lives inline on the widget entry in `~/.config/omarchy/shell.json`
 or via the bar settings UI:
 
 ```sh
-omarchy bar set prpulse.bar pollIntervalSec 120   # poll faster
-omarchy bar set prpulse.bar showCi false          # reviews only
-omarchy bar set prpulse.bar hideWhenZero false    # keep the icon visible
-omarchy bar set prpulse.bar webUrl https://github.com/notifications
+omarchy bar set prpulse.bar forges "github,gitlab"   # poll two forges
+omarchy bar set prpulse.bar gitlabHost https://gitlab.mycorp.com
+omarchy bar set prpulse.bar showCi false             # reviews only
+omarchy bar set prpulse.bar hideWhenZero false       # keep the icon visible
 ```
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `tokenFile` | `~/.config/omarchy/github.token` | Token file checked before the gh keyring |
+| `forges` | `github` | Comma-separated: `github`, `gitlab`, `bitbucket` |
+| `gitlabHost` | `https://gitlab.com` | Point at self-hosted GitLab instances |
+| `gitlabUser` | *(empty)* | Auto-resolved from the API when empty |
+| `secretsDir` | `~/.config/omarchy/prpulse` | Where per-forge token files live |
+| `tokenFile` | `~/.config/omarchy/github.token` | GitHub token file checked before the gh keyring |
 | `pollIntervalSec` | `300` | Refresh cadence (min 60) |
 | `hideWhenZero` | `true` | Hide icon when nothing needs attention |
 | `webUrl` | `https://github.com/pulls` | Left-click target |
-| `showReviews` | `true` | Count PRs awaiting my review |
-| `showCi` | `true` | Count failing CI on my open PRs |
+| `showReviews` / `showCi` | `true` | Toggle either counter |
 
 ## How it works
 
-A single GraphQL request runs two searches per poll:
+Each forge is an isolated adapter under `forge/` speaking that platform's
+native API:
 
-```graphql
-reviews: search(query: "is:pull-request is:open review-requested:@me archived:false") { issueCount }
-failing: search(query: "is:pull-request is:open author:@me status:failure archived:false") { issueCount }
-```
+- GitHub: one GraphQL request with two searches (`review-requested:@me`,
+  `author:@me status:failure`)
+- GitLab: REST v4 `/merge_requests` with `reviewer_username=` +
+  `head_pipeline.status` filtering on your open MRs
+- Bitbucket Cloud: REST 2.0 `pullrequests` lists + per-commit build statuses
 
-`check.sh` prints `<reviews> <failing>`; the QML widget renders state from
-those two numbers.
+`check.sh` runs the adapters you enable, tolerates individual failures
+(a dead forge dims into the tooltip instead of breaking the widget), and
+prints aggregate JSON for the QML widget.
 
 ## Troubleshooting
 
-Hover the widget for the last error message, or run the checker by hand:
+Hover the widget: working forges show as `GH 2R+1F`; broken ones show their
+error line. Run any adapter by hand:
 
 ```sh
-~/.config/omarchy/plugins/prpulse.bar/check.sh ~/.config/omarchy/github.token
+~/.config/omarchy/plugins/prpulse.bar/forge/github.sh ""
+~/.config/omarchy/plugins/prpulse.bar/forge/gitlab.sh https://gitlab.com "" ~/.config/omarchy/prpulse
 ```
 
 Exit codes: `0` ok, `2` setup problem, `3` API failure.
-GraphQL errors (expired token, rate limit) surface in the tooltip verbatim.
 
 ## License
 

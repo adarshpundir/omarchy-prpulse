@@ -9,7 +9,11 @@ BarWidget {
   moduleName: "prpulse.bar"
 
   // --- settings ------------------------------------------------------------
-  readonly property string tokenFile: expandTilde(setting("tokenFile", "~/.config/omarchy/github.token"))
+  readonly property string githubTokenFile: expandTilde(setting("tokenFile", "~/.config/omarchy/github.token"))
+  readonly property string forgesCsv: setting("forges", "github")
+  readonly property string secretsDir: expandTilde(setting("secretsDir", "~/.config/omarchy/prpulse"))
+  readonly property string gitlabHost: setting("gitlabHost", "https://gitlab.com")
+  readonly property string gitlabUser: setting("gitlabUser", "")
   readonly property bool hideWhenZero: setting("hideWhenZero", true)
   readonly property string webUrl: setting("webUrl", "https://github.com/pulls")
   readonly property bool showReviews: setting("showReviews", true)
@@ -18,27 +22,49 @@ BarWidget {
   // --- state ---------------------------------------------------------------
   property int reviews: 0
   property int failing: 0
-  property string lastError: ""
+  property var perForge: ({})
+  property bool allFailed: false
   property bool checked: false
 
   readonly property int attention: (showReviews ? reviews : 0) + (showCi ? failing : 0)
-  readonly property bool configured: true
-  readonly property bool hasError: lastError !== ""
 
-  visible: hasError || attention > 0 || (!hideWhenZero && checked)
+  visible: allFailed || attention > 0 || (!hideWhenZero && checked)
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
 
+  readonly property var forgeLabels: ({ github: "GH", gitlab: "GL", bitbucket: "BB" })
+
   readonly property string tooltipText: {
-    if (hasError) return "GitHub error: " + lastError
-    if (!checked) return "Checking GitHub..."
+    if (!checked) return "PR Pulse is checking..."
     var parts = []
-    if (showReviews) parts.push(reviews + " PR" + (reviews === 1 ? "" : "s") + " awaiting review")
-    if (showCi) parts.push(failing + " CI failure" + (failing === 1 ? "" : "s"))
-    var summary = parts.length > 0 ? parts.join(" · ") : "Nothing needs attention"
-    return "GitHub — " + summary + " · right click to refresh"
+    var problems = []
+    for (var i = 0; i < forgeOrder.length; i++) {
+      var forge = forgeOrder[i]
+      var entry = perForge[forge]
+      if (!entry) continue
+      var label = forgeLabels[forge] || forge
+      if (entry.error !== undefined && entry.error !== "") {
+        problems.push(label + ": " + entry.error)
+      } else {
+        var bits = []
+        if (showReviews) bits.push(entry.reviews + "R")
+        if (showCi) bits.push(entry.failing + "F")
+        parts.push(label + " " + bits.join("+"))
+      }
+    }
+    if (problems.length > 0) parts = parts.concat(problems)
+    return parts.length === 0 ? "Nothing configured" : parts.join(" · ")
+  }
+  readonly property var forgeOrder: {
+    var out = []
+    var list = forgesCsv.split(",")
+    for (var i = 0; i < list.length; i++) {
+      var name = list[i].trim()
+      if (name !== "") out.push(name)
+    }
+    return out
   }
 
   function expandTilde(path) {
@@ -52,7 +78,7 @@ BarWidget {
     if (!checkProc.running) checkProc.running = true
   }
 
-  function openGithub() {
+  function openForge() {
     if (root.bar && webUrl !== "") root.bar.run("xdg-open \"" + webUrl + "\"")
   }
 
@@ -64,27 +90,32 @@ BarWidget {
 
   Process {
     id: checkProc
-    command: [Qt.resolvedUrl("check.sh").toString().replace("file://", ""), root.tokenFile]
+    command: [Qt.resolvedUrl("check.sh").toString().replace("file://", ""),
+              root.githubTokenFile, root.forgesCsv, root.secretsDir,
+              root.gitlabHost, root.gitlabUser]
+
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var parts = text.trim().split(/\s+/)
-        if (parts.length >= 2) {
-          root.reviews = parseInt(parts[0], 10) || 0
-          root.failing = parseInt(parts[1], 10) || 0
+        var raw = text.trim()
+        if (raw === "") return
+        try {
+          var data = JSON.parse(raw)
+          root.reviews = data.total.reviews
+          root.failing = data.total.failing
+          root.perForge = data.forges
+        } catch (e) {
+          root.allFailed = true
         }
       }
     }
     stderr: StdioCollector {
       waitForEnd: true
-      onStreamFinished: {
-        var message = text.trim()
-        if (message !== "") root.lastError = message.split("\n")[0]
-      }
+      onStreamFinished: { /* per-forge errors arrive via stdout JSON */ }
     }
     onExited: function(exitCode) {
       root.checked = true
-      if (exitCode === 0) root.lastError = ""
+      root.allFailed = exitCode === 3
     }
   }
 
@@ -103,12 +134,12 @@ BarWidget {
     text: "\uf09b"
     slotSize: Style.bar.statusSlot
     fontSize: Style.font.caption
-    active: root.hasError || root.failing > 0
-    dimmed: !root.hasError && root.checked && root.attention === 0
+    active: root.allFailed || root.failing > 0
+    dimmed: !root.allFailed && root.checked && root.attention === 0
     tooltipText: root.tooltipText
 
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.LeftButton) root.openGithub()
+      if (buttonCode === Qt.LeftButton) root.openForge()
       else root.refresh()
     }
 

@@ -2,24 +2,28 @@
   "schemaVersion": 1,
   "id": "prpulse.bar",
   "name": "PR Pulse",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "PR Pulse contributors",
   "license": "MIT",
-  "description": "Pull requests awaiting your review and CI failures on your open PRs, live in the Omarchy bar.",
+  "description": "PR review requests and CI failures across GitHub, GitLab and Bitbucket, live in the Omarchy bar.",
   "kinds": [
     "bar-widget"
   ],
   "entryPoints": {
-    "barWidget": "GithubWidget.qml"
+    "barWidget": "Widget.qml"
   },
   "barWidget": {
     "displayName": "PR Pulse",
-    "description": "PRs awaiting your review and failing CI on your PRs. Left click opens GitHub, right click refreshes.",
+    "description": "Review requests & CI failures for GitHub, GitLab and Bitbucket. Left click opens your forge, right click refreshes.",
     "category": "Developer Tools",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
+      "forges": "github",
       "tokenFile": "~/.config/omarchy/github.token",
+      "secretsDir": "~/.config/omarchy/prpulse",
+      "gitlabHost": "https://gitlab.com",
+      "gitlabUser": "",
       "pollIntervalSec": 300,
       "hideWhenZero": true,
       "webUrl": "https://github.com/pulls",
@@ -28,9 +32,29 @@
     },
     "schema": [
       {
+        "key": "forges",
+        "type": "string",
+        "label": "Forges to poll (comma separated: github, gitlab, bitbucket)"
+      },
+      {
         "key": "tokenFile",
         "type": "string",
-        "label": "Path to file containing a GitHub token (repo scope)"
+        "label": "GitHub token file (optional if gh CLI is logged in)"
+      },
+      {
+        "key": "secretsDir",
+        "type": "string",
+        "label": "Directory for per-forge token files (gitlab.token, bitbucket.token)"
+      },
+      {
+        "key": "gitlabHost",
+        "type": "string",
+        "label": "GitLab host (change for self-hosted)"
+      },
+      {
+        "key": "gitlabUser",
+        "type": "string",
+        "label": "GitLab username (auto-detected when empty)"
       },
       {
         "key": "pollIntervalSec",
@@ -55,7 +79,7 @@
       {
         "key": "showReviews",
         "type": "boolean",
-        "label": "Count PRs awaiting my review",
+        "label": "Count items awaiting my review",
         "defaultValue": true
       },
       {
