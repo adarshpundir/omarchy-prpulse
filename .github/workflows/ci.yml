@@ -1,4 +1,4 @@
-name: CI
+name: CI (test failure)
 
 on:
   push:
@@ -31,3 +31,8 @@ jobs:
       - name: No secrets tracked
         run: |
           ! grep -rEn 'ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}' .
+
+  force-fail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1

@@ -14,10 +14,17 @@ BarWidget {
   readonly property string secretsDir: expandTilde(setting("secretsDir", "~/.config/omarchy/prpulse"))
   readonly property string gitlabHost: setting("gitlabHost", "https://gitlab.com")
   readonly property string gitlabUser: setting("gitlabUser", "")
-  readonly property bool hideWhenZero: setting("hideWhenZero", true)
   readonly property string webUrl: setting("webUrl", "https://github.com/pulls")
-  readonly property bool showReviews: setting("showReviews", true)
-  readonly property bool showCi: setting("showCi", true)
+  readonly property bool hideWhenZero: asBool(setting("hideWhenZero", true))
+  readonly property bool showReviews: asBool(setting("showReviews", true))
+  readonly property bool showCi: asBool(setting("showCi", true))
+
+  function asBool(value) {
+    if (value === true) return true
+    if (value === false) return false
+    if (typeof value === "string") return value.trim().toLowerCase() === "true"
+    return Boolean(value)
+  }
 
   // --- state ---------------------------------------------------------------
   property int reviews: 0
