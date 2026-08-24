@@ -21,7 +21,7 @@ secrets_dir=$3
 gitlab_host=$4
 gitlab_user=$5
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
