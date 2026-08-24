@@ -1,0 +1,8 @@
+# secrets - never commit credentials
+*.token
+*.secret
+.env
+
+# editor / OS noise
+*.swp
+.DS_Store

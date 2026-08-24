@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "id": "prpulse.bar",
+  "name": "PR Pulse",
+  "version": "0.1.0",
+  "author": "PR Pulse contributors",
+  "license": "MIT",
+  "description": "Pull requests awaiting your review and CI failures on your open PRs, live in the Omarchy bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "GithubWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "PR Pulse",
+    "description": "PRs awaiting your review and failing CI on your PRs. Left click opens GitHub, right click refreshes.",
+    "category": "Developer Tools",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "tokenFile": "~/.config/omarchy/github.token",
+      "pollIntervalSec": 300,
+      "hideWhenZero": true,
+      "webUrl": "https://github.com/pulls",
+      "showReviews": true,
+      "showCi": true
+    },
+    "schema": [
+      {
+        "key": "tokenFile",
+        "type": "string",
+        "label": "Path to file containing a GitHub token (repo scope)"
+      },
+      {
+        "key": "pollIntervalSec",
+        "type": "integer",
+        "label": "Poll interval (seconds)",
+        "min": 60,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 300
+      },
+      {
+        "key": "hideWhenZero",
+        "type": "boolean",
+        "label": "Hide icon when nothing needs attention",
+        "defaultValue": true
+      },
+      {
+        "key": "webUrl",
+        "type": "string",
+        "label": "URL opened on left click"
+      },
+      {
+        "key": "showReviews",
+        "type": "boolean",
+        "label": "Count PRs awaiting my review",
+        "defaultValue": true
+      },
+      {
+        "key": "showCi",
+        "type": "boolean",
+        "label": "Count failing CI on my open PRs",
+        "defaultValue": true
+      }
+    ]
+  }
+}

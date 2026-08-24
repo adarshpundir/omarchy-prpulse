@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install linters
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+
+      - name: ShellCheck check.sh
+        run: shellcheck --severity=warning check.sh
+
+      - name: Manifest is valid JSON with required fields
+        run: |
+          jq -e '
+            .schemaVersion == 1 and
+            (.id | type == "string") and
+            (.kinds | index("bar-widget")) and
+            .entryPoints.barWidget
+          ' manifest.json > /dev/null
+
+      - name: Entry points exist
+        run: test -f "$(jq -r .entryPoints.barWidget manifest.json)"
+
+      - name: No secrets tracked
+        run: |
+          ! grep -rEn 'ghp_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{20,}' .
